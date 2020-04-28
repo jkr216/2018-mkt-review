@@ -1,0 +1,401 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r setup, include = FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(message=FALSE, warning=FALSE, comment = NA)
+library(tidyverse)
+library(tidyquant)
+library(riingo)
+library(timetk)
+library(tibbletime)
+library(highcharter)
+library(htmltools)
+```
+
+
+Welcome to Reproducible Finance 2019! It's a new year, a new beginning, the Earth has completed one more trip around the sun and that means it's time to look back on the previous January to December cycle.
+
+Today and next time, we'll explore the returns and volatilities of various market sectors in 2018. We might also get into fund flows and explore a new data source because [this fantastic piece](https://www.ft.com/content/fdc1c064-1142-11e9-a581-4ff78404524e) from the FT has the wheels turning. So much data, so little time.
+
+Back to the task at hand, today we will grab data on the daily returns of various stock market sector ETFs and build exploratory data visualizations around that data.
+
+From an R code perspective, we will get familiar with a new source for market data (tiingo, which has come up in several conversations recently and seems to be gaining nice traction in the R world), build some ggplots and dive into `highcharter` a bit. In that sense, it's also somewhat of a look back to our previous work because we'll be stepping through some good'ol data import, wrangling and visualization. Some of the code flows might look familiar to long time readers but if you've joined us recently, and haven't gone  back to read the oh-so-invigorating previous posts, this should give a good sense of how we think about working with financial data. 
+
+Let's get to it.
+
+We want to import data on 10 sector ETFs and also on SPY, the market ETF. 
+
+We'll first need the tickers of each sector ETF:
+
+```{r, eval = FALSE}
+ticker = ("XLY", "XLP", "XLE",	
+          "XLF", "XLV",	"XLI", "XLB", 
+          "XLK", "XLU", "XLRE", 
+          "SPY")
+```
+
+and our sector labels are:
+
+```{r, eval = FALSE}
+sector = ("Consumer Discretionary", "Consumer Staples", "Energy", 
+          "Financials", "Health Care", "Industrials", "Materials", 
+          "Information Technology", "Utilities", "Real Estate",
+          "Market")
+```
+
+We can use the `tibble()` function to save those as columns of new `tibble`.
+
+First, let's load up our packages for the day because we'll need the `tibble` package via `tidyverse`.
+
+```{r, eval=FALSE}
+library(tidyverse)
+library(tidyquant)
+library(riingo)
+library(timetk)
+library(tibbletime)
+library(highcharter)
+library(htmltools)
+```
+
+And on to creating a tibble:
+
+```{r}
+
+etf_ticker_sector <- tibble(
+  ticker = c("XLY", "XLP", "XLE",	
+          "XLF", "XLV",	"XLI", "XLB", 
+          "XLK", "XLU", "XLRE", 
+          "SPY"),	
+  sector = c("Consumer Discretionary", "Consumer Staples", "Energy", 
+          "Financials", "Health Care", "Industrials", "Materials", 
+          "Information Technology", "Utilities", "Real Estate",
+          "Market")
+)
+
+etf_ticker_sector
+```
+
+
+Now we want to import the daily prices for 2018 for these tickers. We could use `getSymbols()` to access yahoo! Finance as we have done for the last 3 years, but let's do something crazy and explore a new data source, the excellent [tiingo](https://tiingo.com)  which we access via the [riingo](https://cran.r-project.org/web/packages/riingo/riingo.pdf) package.
+The workhorse function to grab price data is `riingo_prices`, to which we need to supply our tickers and a `start_date`/`end_date` pair. 
+
+Let's start with the tickers, which we have already saved in the `ticker` column of `etf_ticker_sector`. That wasn't really necssary. We could have just created a vector called `tickers_vector` by calling `tickers_vector = c("ticker1", "ticker2", ...)` and then passed that vector straight to `riingo_prices`. But I didn't want to do that because I prefer to get my data to a tibble first and, as we'll see, it will make it easier to add back in our sector labels, since they are aligned with our tickers in one object.
+
+To pass our `ticker` column to `riingo_prices()`, we start with our tibble `etf_ticker_sector` and then pipe it to `pull(ticker)`. That will create a vector from the `ticker` column. The `pull()` function is very useful in these situations where we want to pipe or extract a column as a vector.
+
+Here's the result of pulling the tickers: 
+
+```{r}
+  etf_ticker_sector %>%
+  pull(ticker)
+```
+
+Now we want to pass those tickers to `riingo_prices()`, but first we need to create an API key.  `riingo` makes that quite convenient: 
+
+```{r, eval = FALSE}
+riingo_browse_signup()
+# This requires that you are signed in on the site once you sign up
+riingo_browse_token() 
+```
+
+Then we set our key for use this session with:
+
+```{r, include=FALSE}
+
+# Need an API key for tiingo
+
+riingo_set_token("97d26898fe27141ef524c1fa3ab0d3f0c3c59b09")
+```
+
+```{r, eval = FALSE}
+
+# Need an API key for tiingo
+
+riingo_set_token("your API key here")
+```
+
+
+Now we can pipe straight to `riingo_prices()`. We will set `start_date = "2017-12-29"` and `end_date = "2018-12-31"` to get prices for just 2018. I wanted the last trading day of 2017 because eventually we'll calculate daily returns of 2018.
+
+
+```{r}
+  etf_ticker_sector %>%
+  pull(ticker) %>% 
+  riingo_prices(., 
+                start_date = "2017-12-29",
+                end_date = "2018-12-31") %>% 
+  head()
+```
+
+Alright, quite a bit of data: OHLC, volume, ticker, dividends, splits, and note that the `date` column is in POSIX format. 
+
+Let's go ahead and coerce that to `date` format and add back in our sector labels. 
+We coerce the date with the `ymd()` function from lubridate and then add our labels with a call to `left_join(etf_ticker_sector, by = "ticker")`. There's a column called `ticker` in the prices data and in our original tibble, so we can join by that column and add back the sector labels. 
+
+It's a good idea to use `group_by(ticker)` and then `slice(1)` to grab the first row of each ticker. This helps to confirm that the sector labels got added how we planned. 
+
+```{r}
+  etf_ticker_sector %>%
+  pull(ticker) %>% 
+  riingo_prices(., 
+                start_date = "2017-12-29",
+                end_date = "2018-12-31") %>%
+  mutate(date = ymd(date)) %>% 
+  left_join(etf_ticker_sector, by = "ticker") %>%
+  select(sector, everything()) %>%
+  group_by(ticker) %>% 
+  slice(1)
+```
+
+Okay, we have daily data for our ETFs and sector labels. Now, let's calculate the daily returns of each sector. We'll start by slimming our data down to just the `sector`, `date` and `adjClose` columns. Then we'll `group_by(sector)` and calculate daily returns with `mutate(daily_return = log(adjClose) - log(lag(adjClose))) `.
+
+```{r}
+  etf_ticker_sector %>%
+  pull(ticker) %>% 
+  riingo_prices(., 
+                start_date = "2017-12-29",
+                end_date = "2018-12-31") %>%
+  mutate(date = ymd(date)) %>%
+  left_join(etf_ticker_sector, by = "ticker") %>%
+  select(sector, date, adjClose) %>%
+  group_by(sector) %>% 
+  mutate(daily_return = log(adjClose) - log(lag(adjClose))) %>% 
+  na.omit() %>% 
+  slice(1)
+```
+
+Notice that our first daily return is for January 2nd. That makes sense because January 1st is generally a national holiday and the markets are closed. If we did have a daily return for January 1st, it would be worth investigating to make sure the market was indeed open that day.
+
+Let's go ahead and save that data on daily returns by sector as an object called `sector_returns_2018`.
+
+```{r}
+sector_returns_2018 <- 
+  etf_ticker_sector %>%
+  pull(ticker) %>% 
+  riingo_prices(., 
+                start_date = "2017-12-29",
+                end_date = "2018-12-31") %>%
+  mutate(date = ymd(date)) %>%
+  left_join(etf_ticker_sector, by = "ticker") %>%
+  select(sector, date, adjClose) %>%
+  group_by(sector) %>% 
+  mutate(daily_return = log(adjClose) - log(lag(adjClose))) %>% 
+  na.omit() 
+```
+
+We have our data and now the fun part - let's do some exploration and visualization and get a feel for 2018. We start with `ggplot()` and create a chart showing the daily return of each ETF, colored. We want date on the x axis, daily returns on the y-axis and different colors by sector. That means a call to `ggplot(aes(x = date, y = daily_return, color = sector))`.
+
+```{r}
+sector_returns_2018 %>% 
+  ggplot(aes(x = date, y = daily_return, color = sector))
+
+```
+
+Mmmmm, not exactly what we had in mind. It's a blank canvas! That's because we have told `ggplot()` what data we want mapped where, but we haven't layered on a geom yet. Let's add `geom_col()`.
+
+```{r}
+sector_returns_2018 %>% 
+  ggplot(aes(x = date, y = daily_return, color = sector)) + 
+  geom_col()
+
+```
+
+Better, we have a chart of all our data! But it's a bit hard to see the individual returns. Let's `facet_wrap()` by sector. I also don't love that legend so will add `show.legend = FALSE` to `geom_col()`.
+
+```{r}
+sector_returns_2018 %>% 
+  ggplot(aes(x = date, y = daily_return, color = sector)) + 
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(~sector)
+
+```
+
+Very close, but the date is all jumbled and the y-axis label isnt' quite right - there's no `%` sign. 
+Let's change the angle of the date labels to 45 degress with `theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))` and add the percentage sign wih `scale_y_continuous(labels = function(x) paste0(x, "%"))`.
+
+```{r}
+sector_returns_2018 %>% 
+  ggplot(aes(x = date, y = daily_return, color = sector)) + 
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(~sector) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  # clean up the x and y axis titles
+  labs(x = "", y = "daily returns")
+
+```
+
+That's an interesting panel of charts to my eye, tech looks pretty volatile since October! We can and will (next time) get more rigorous about such assessments by using the rolling standard deviation (and we'll add a new tool by using exponential weighting) but the basic pipeline of raw data to tibble for wrangling and transformation then to chart for exploration will remain the same.
+
+Let's stick with just daily returns for today and plot the same data with a different color schema. Instead of coloring by sector, let's color by whether the daily return was positive or negative. This is going to be similar to what we did in a previous post on [highcharting jobs Friday](http://www.reproduciblefinance.com/2018/08/11/highcharting-jobs-friday/). 
+
+First let's create two new columns called `col_pos` and `col_neg`. `col_pos` will hold the daily returns that are positive and an NA for returns are negative. We code that with:
+
+```{r, eval = FALS}
+sector_returns_2018 %>% 
+mutate(col_pos =if_else(daily_return > 0, 
+                  daily_return, as.numeric(NA)))
+```
+
+And `col_neg` will hold negative returns: 
+
+```{r, eval = FALSE}
+sector_returns_2018 %>% 
+mutate(col_neg =if_else(daily_return < 0, 
+                  daily_return, as.numeric(NA)))
+```
+
+Then we'll tell `ggplot()` to chart those two columns in their own geoms and can choose a custom color. The geoms won't overlap because they have no common data. Here is the full code flow. We start with `sector_returns_2018`, create our new color columns, then pipe to `ggplot()`.
+
+
+```{r, fig.height=10, fig.width=12, warning = FALSE}
+
+sector_returns_2018 %>% 
+   mutate(col_pos = 
+           if_else(daily_return > 0, 
+                  daily_return, as.numeric(NA)),
+         col_neg = 
+           if_else(daily_return < 0, 
+                  daily_return, as.numeric(NA))) %>%
+  ggplot(aes(x = date)) +
+  geom_col(aes(y = col_neg),
+               alpha = .85, 
+               fill = "pink", 
+               color = "pink") +
+  geom_col(aes(y = col_pos),
+               alpha = .85, 
+               fill = "cornflowerblue", 
+               color = "cornflowerblue") +
+  facet_wrap(~sector)
+```
+
+That looks good, but let's do some further customization of the non-substantive aesthetics, meaning the aesthetics that don't actually depend on our data.
+
+
+```{r, fig.height=10, fig.width=12, warning = FALSE}
+
+sector_returns_2018 %>% 
+   mutate(col_pos = 
+           if_else(daily_return > 0, 
+                  daily_return, as.numeric(NA)),
+         col_neg = 
+           if_else(daily_return < 0, 
+                  daily_return, as.numeric(NA))) %>%
+  ggplot(aes(x = date)) +
+  geom_col(aes(y = col_neg),
+               alpha = .85, 
+               fill = "pink", 
+               color = "pink") +
+  geom_col(aes(y = col_pos),
+               alpha = .85, 
+               fill = "cornflowerblue", 
+               color = "cornflowerblue") +
+  facet_wrap(~sector, shrink = FALSE) +
+  labs(title = "2018 daily returns", y = "daily returns") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        strip.background = element_blank(),
+        strip.placement = "inside",
+        strip.text = element_text(size=15),
+        panel.spacing = unit(0.2, "lines") ,
+        panel.background=element_rect(fill="white"))
+```
+
+Before we close, let's take some of this work and translate it to `highcharter`. If we simpy want to chart one sector's daily returns, it would be a relatively straightforward mapping from `ggplot()` to `highcharter`. We start with our tibble `sector_returns_2018`, add a column to hold different color hex codes, and then pass the data to `hchart()` using a `.`, and set aesthetics with `hcaes()`. The key is to first `filter()` down to our sector of choice, in this caes `filter(sector == "Information Technology")`.
+
+```{r}
+sector_returns_2018 %>%
+  mutate(color_col = if_else(daily_return > 0, "#6495ed", "#ff9999"),
+          date = ymd(date)) %>% 
+  filter(sector == "Information Technology") %>% 
+  hchart(., hcaes(x = date, y = daily_return, color = color_col),
+         type = "column",
+         pointWidth = 4)
+```
+That chart looks good and we can hover on the bars to see the exact daily return and date for each observation.
+
+I love highcharter and in the next month I'll be launching a datacamp course that covers `Highcharter for Finance` but, I must say, it doesn't have a good way to `facet_wrap()` and build separate charts for each sector. We can dream about some sort of hc_facet function but for now we'll need to build a custom function for that job, similar to what we did for the [jobs report](http://www.reproduciblefinance.com/2018/08/11/highcharting-jobs-friday/).
+
+We start by spreading our data to wide format, because we're going to build a chart using each column.
+
+```{r}
+sector_returns_2018_wide <- 
+  sector_returns_2018 %>% 
+  select(-adjClose) %>% 
+  spread(sector, daily_return)
+
+sector_returns_2018_wide
+
+```
+
+Now for our function that will create a separate highchart for each sector, we start with `map` and pass in the columns names from that wide tibble we just created. That's how we will iterate over each sector. After mapping across the names, we use `function(x)` to pass the column name into our code flow.
+
+```{r, eval = FALSE}
+
+map(names(sector_returns_2018_wide[2:11]), function(x){
+
+sector_returns_2018_hc <- 
+  sector_returns_2018 %>% 
+  filter(sector == x) %>% 
+   mutate(coloract = if_else(daily_return > 0, "#6495ed", "#ff9999"))
+
+highchart() %>%
+  hc_title(text = paste(x, "2018 daily returns", sep = " ")) %>%
+  hc_add_series(sector_returns_2018_hc,  
+                type = "column", 
+                pointWidth = 4,
+                hcaes(x = date,
+                      y = daily_return,
+                      color = coloract),
+                name = "daily return") %>% 
+  hc_xAxis(type = "datetime") %>%
+  hc_tooltip(pointFormat = "{point.date}: {point.daily_return: .4f}%") %>% 
+  hc_legend(enabled = FALSE) %>% 
+  hc_exporting(enabled = TRUE)
+})
+```
+
+If you run the code chunk above, it will create 11 separate highcharts of our data as stand alone charts, meaning they won't be layed out with any structure. That's fine, but I want to be able to lay these out in a grid and control the height of each chart. For that we use
+`hw_grid(rowheight = 300, ncol = 3) %>% htmltools::browsable()`. That will create a grid that displays each of the charts - one for each sector's daily returns.
+
+```{r}
+
+map(names(sector_returns_2018_wide[2:11]), function(x){
+
+sector_returns_2018_hc <- 
+  sector_returns_2018 %>% 
+  filter(sector == x) %>% 
+   mutate(coloract = if_else(daily_return > 0, "#6495ed", "#ff9999"),
+          date = ymd(date))
+
+highchart() %>%
+  hc_title(text = paste(x, "2018 daily returns", sep = " ")) %>%
+  hc_add_series(sector_returns_2018_hc,  
+                type = "column", 
+                pointWidth = 4,
+                hcaes(x = date,
+                      y = daily_return,
+                      color = coloract),
+                name = "daily return") %>% 
+  hc_xAxis(type = "datetime") %>%
+  hc_tooltip(pointFormat = "{point.date}: {point.daily_return: .4f}%") %>% 
+  hc_legend(enabled = FALSE) %>% 
+  hc_exporting(enabled = TRUE)
+}) %>% 
+  hw_grid(rowheight = 300, ncol = 3) %>% 
+  htmltools::browsable()
+```
+
+That's all for today. In general, the flow here was to create a tibble of tickers and labels, grab price data, visualize daily returns organized by the original labels. We applied it to sectors, but it could just as easily be applied to other labels, like risk levels, geography, beta, etc. 
+
+Shameless book plug for those who read to the end: if you like this sort of thing, check out my new book [Reproducible Finance with R](https://www.amazon.com/Reproducible-Finance-Portfolio-Analysis-Chapman/dp/1138484032)! 
+
+Thanks for reading and see you next time.
+
+
+

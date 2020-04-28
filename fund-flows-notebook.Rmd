@@ -1,0 +1,104 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+There's a great piece on the FT today about algos and fund flows. It's author, Robin Wigglesworth, has become one of my personal favorites, for good writing in general and for good inspiration about interesting data. Today's article had a nice chart about mutual fund and ETF fund flows and it sent me down a rabbit hole to try to find some publicly available data on that topic and put into a quick chart. Next week I'll go a little deeper on how to use this data but for today let's just see if we can approximate the original data vis.
+
+First let's grab some flows data. The [ICI](https://www.ici.org/research/stats/flows) publishes some data on the last three years of fund flows, for both mutual funds and ETF funds. The [original article](https://www.ft.com/content/fdc1c064-1142-11e9-a581-4ff78404524e) by [RW](https://www.linkedin.com/in/robin-wigglesworth-17101722/) has data going back much further and it's sourced from EPFR, a higher grade data provider that is not free. Our purpose is to explore some R code so we will stick with the free data source.
+
+We'll first read in the location of the data and then name the file that will be downloaded.
+
+```{r}
+library(tidyverse)
+library(readxl)
+url <- "https://www.ici.org/info/combined_flows_data_2018.xls"
+destfile <- "combined_flows_data_2018.xls"
+curl::curl_download(url, destfile)
+```
+
+Next we pass that information to `read_excel()` and clean up the raw data and column names.
+
+```{r}
+combined_flows_data_2018 <- read_excel(destfile, 
+    col_types = c("text", "numeric", "skip", 
+        "numeric", "skip", "numeric", "skip", 
+        "numeric", "skip", "numeric", "skip", 
+        "numeric", "skip", "numeric", "skip", 
+        "numeric", "skip", "numeric"), skip = 5) %>% 
+  rename(date = X__1, all = X__2, total_equity = Total, 
+         domestic_equity = Domestic, world_equity = World, 
+         hybrid = X__3, total_bond = Total__1, commmodity = X__4, 
+         muni_bond = Municipal, taxable_bond = Taxable) %>% 
+  slice(-1:-2) %>%
+  na.omit() %>% 
+  mutate(date = ymd(parse_date_time(date, '%m/%d/%Y')))
+
+combined_flows_data_2018 %>% 
+  head()
+
+```
+
+From there, we `gather()` to tidy format and head to `ggplot()`, faceting by the type of fund.
+
+```{r, warning = FALSE}
+combined_flows_data_2018 %>%
+  gather(fund_type, flow, -date) %>% 
+  mutate(col_pos = 
+           if_else(flow > 0, 
+                  flow, as.numeric(NA)),
+         col_neg = 
+           if_else(flow < 0, 
+                  flow, as.numeric(NA))) %>%
+  ggplot(aes(x = date)) +
+  geom_col(aes(y = col_neg),
+               alpha = .85, 
+               fill = "pink", 
+               color = "pink") +
+  geom_col(aes(y = col_pos),
+               alpha = .85, 
+               fill = "cornflowerblue", 
+               color = "cornflowerblue") +
+  facet_wrap(~fund_type, shrink = FALSE) +
+  labs(title = "Weekly fund flows", subtitle = "2016 - 2018", caption = "source: inspired by @RobinWigg", y = "flows (millions)", x = "") +
+  scale_y_continuous(label= scales::dollar_format()) +
+  scale_x_date(breaks = scales::pretty_breaks(n = 10)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        strip.background = element_blank(),
+        strip.placement = "inside",
+        strip.text = element_text(size=15),
+        panel.spacing = unit(0.2, "lines") ,
+        panel.background=element_rect(fill="white"))
+
+```
+
+That's all! Over the next week we'll be looking back at 2018 and we'll add this new data to the exploration.
+
+
+```{r, warning = FALSE}
+combined_flows_data_2018 %>%
+  gather(fund_type, flow, -date) %>%
+  mutate(flow_dir = case_when(
+            (flow) >= 0 ~ "Positive",
+            TRUE                   ~ "Negative") %>% as.factor()) %>% 
+  ggplot(aes(x = date)) +
+  geom_col(aes(y = flow, fill = flow_dir)) +
+  scale_fill_manual(values = c("blue", "pink")) +  
+  facet_wrap(~fund_type, shrink = FALSE) +
+  labs(title = "Weekly fund flows", subtitle = "2016 - 2018", caption = "source: inspired by @RobinWigg", y = "flows (millions)", x = "") +
+  scale_y_continuous(label= scales::dollar_format()) +
+  scale_x_date(breaks = scales::pretty_breaks(n = 10)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        strip.background = element_blank(),
+        strip.placement = "inside",
+        strip.text = element_text(size=15),
+        panel.spacing = unit(0.2, "lines") ,
+        panel.background=element_rect(fill="white"))
+
+```

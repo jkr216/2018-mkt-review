@@ -1,0 +1,190 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+ etf_ticker_sector %>%
+  filter(ticker == "SPY") %>% 
+  pull(ticker) %>% 
+  riingo_prices(., 
+                start_date = "1997-12-29",
+                end_date = "2018-12-31") %>% 
+  select(ticker, date, adjClose) %>%
+  separate(date, into = c("year", "month"), sep = "-", remove = FALSE) %>% 
+  mutate(daily_return = log(adjClose) - log(lag(adjClose))) %>% 
+  na.omit() %>% 
+  group_by(year) %>% 
+  filter(daily_return == max(daily_return)) %>%
+  mutate(date = ymd(date)) %>% 
+  select(date, year, max = daily_return) %>% 
+  hchart(., hcaes(x = year, y = max),
+          type = "column") %>% 
+  hc_title(text = "Max daily return by year") %>% 
+  hc_yAxis(labels = list(format = "{value}%")) %>% 
+  hc_tooltip(headerFormat = "Max return<br>",
+    pointFormat = "{point.date}: {point.max: .4f}%")
+```
+
+
+```{r}
+etf_ticker_sector %>%
+  filter(ticker == "SPY" |
+        ticker == "XLP") %>% 
+  pull(ticker) %>% 
+  riingo_prices(., 
+                start_date = "2008-12-29",
+                end_date = "2018-12-31") %>% 
+  select(ticker, date, adjClose) %>%
+  separate(date, into = c("year", "month"), sep = "-", remove = FALSE) %>% 
+  mutate(daily_return = log(adjClose) - log(lag(adjClose))) %>% 
+  na.omit() %>% 
+  group_by(year, ticker) %>% 
+  filter(daily_return == max(daily_return)) %>% 
+  select(date, year, max = daily_return) %>% 
+  mutate(coloract = case_when(ticker == "XLP" ~ "#ff4d4d",
+                            TRUE ~ "#3385ff"),
+         date = ymd(date)) %>% 
+  hchart(., 
+       type = 'column', 
+       hcaes(y = max,
+             x = year,
+             group = ticker,
+             color = coloract)) %>%
+  hc_title(text = "Max Daily Return, SPY v. XLP") %>% 
+  hc_tooltip(headerFormat = "",
+             pointFormat = "{point.ticker} max return: <br> {point.date} {point.max: .4f}%") %>% 
+  hc_legend(enabled = FALSE)
+```
+
+```{r}
+min_return_year <- 
+  etf_ticker_sector %>%
+  filter(ticker == "SPY" |
+        ticker == "XLP" |
+          ticker == "XLV" |
+          ticker == "XLF") %>% 
+  pull(ticker) %>% 
+  riingo_prices(., 
+                start_date = "1999-12-31",
+                end_date = "2018-12-31") %>% 
+  select(ticker, date, adjClose) %>%
+  separate(date, into = c("year", "month"), sep = "-", remove = FALSE) %>%
+  group_by(ticker) %>% 
+  mutate(daily_return = log(adjClose) - log(lag(adjClose))) %>% 
+  na.omit() %>% 
+  group_by(year, ticker) %>% 
+  filter(daily_return == min(daily_return))
+```
+
+```{r}
+min_return_year %>% 
+  select(date, year, min = daily_return) %>% 
+  mutate(coloract = case_when(ticker == "XLP" ~ "#ff4d4d",
+                              ticker == "XLF" ~ "#ff99ff",
+                              ticker == "XLV" ~ "#008060",
+                              TRUE ~ "#3385ff"),
+         date = ymd(date)) %>% 
+  hchart(., 
+       type = 'column', 
+       hcaes(y = min,
+             x = year,
+             group = ticker,
+             color = coloract)) %>%
+  hc_title(text = "Min Daily Return, SPY v. XLP") %>% 
+  hc_tooltip(headerFormat = "",
+             pointFormat = "{point.ticker} min return: <br> {point.date} {point.min: .4f}%") %>% 
+  hc_legend(enabled = FALSE)
+```
+
+
+```{r}
+min_return_year_all <- 
+  etf_ticker_sector %>%
+  pull(ticker) %>% 
+  riingo_prices(., 
+                start_date = "1999-12-31",
+                end_date = "2018-12-31") %>% 
+  select(ticker, date, adjClose) %>%
+  separate(date, into = c("year", "month"), sep = "-", remove = FALSE) %>%
+  group_by(ticker) %>% 
+  mutate(daily_return = log(adjClose) - log(lag(adjClose))) %>% 
+  na.omit() %>% 
+  group_by(year, ticker) %>% 
+  filter(daily_return == min(daily_return))
+
+months <- 
+  min_return_year %>% 
+  mutate(months = month(date, label = TRUE, abbr = FALSE)) %>% 
+  pull() %>%
+  levels() %>% 
+  as.character()
+  
+  min_return_year_all %>% 
+  #select(date, year, min = daily_return) %>% 
+  # mutate(coloract = case_when(ticker == "XLP" ~ "#ff4d4d",
+  #                             ticker == "XLF" ~ "#ff99ff",
+  #                             ticker == "XLV" ~ "#008060",
+  #                             TRUE ~ "#3385ff"),
+  mutate(month = as.numeric(month),
+         name_of_month = month(date, label = TRUE, abbr = FALSE)) %>% 
+    ggplot(aes(x = month, y = daily_return, color = ticker)) +
+    geom_point() +
+    scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12), 
+                       labels = months) + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    facet_wrap(~ticker)
+ 
+```
+
+
+```{r}
+library(gganimate)
+library(png)
+library(gifski)
+
+test <- min_return_year_all %>% 
+  mutate(month = as.numeric(month),
+         name_of_month = month(date, label = TRUE, abbr = FALSE)) %>% 
+    ggplot(aes(x = month, y = daily_return, color = ticker)) +
+    geom_point() +
+    scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12), 
+                       labels = months) + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  transition_time(month)
+
+test
+
+```
+
+
+```{r}
+min_return_year_all %>% 
+  #select(date, year, min = daily_return) %>% 
+  # mutate(coloract = case_when(ticker == "XLP" ~ "#ff4d4d",
+  #                             ticker == "XLF" ~ "#ff99ff",
+  #                             ticker == "XLV" ~ "#008060",
+  #                             TRUE ~ "#3385ff"),
+  mutate(month = as.numeric(month),
+         name_of_month = month(date, label = TRUE, abbr = FALSE)) %>% 
+  #group_by(ticker) %>%
+  ungroup() %>% 
+  count(name_of_month) %>% 
+  ggplot(aes(x = name_of_month, y = n)) +
+  geom_col()
+```
+
+
+```{r}
+  
+hchart(min_return_year, 
+       type = 'scatter', 
+       hcaes(y = daily_return,
+             x = ymd(date),
+             group = ticker)) %>%
+  hc_title(text = "Min Daily Return, SPY v. XLP") %>%
+#  hc_xAxis(categories = min_return_year$name_of_month) %>% 
+  hc_tooltip(headerFormat = "",
+             pointFormat = "{point.ticker} min return: <br> {point.date} {point.min: .4f}%") %>% 
+  hc_legend(enabled = FALSE)
+```

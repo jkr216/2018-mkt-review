@@ -1,0 +1,85 @@
+---
+title: "Untitled"
+runtime: shiny
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+
+Sidebar {.sidebar}
+=====================================
+  
+```{r}
+library(shinymaterial)
+material_page(
+  title = "shinymaterial",
+  tags$br(),
+  material_row(
+    material_column(
+      width = 2,
+      material_card(
+        title = "",
+        depth = 4,
+        material_switch(
+          input_id = "facet_cyl",
+          label = "By Cylinder",
+          off_label = "",
+          on_label = "",
+          initial_value = TRUE
+        ),
+        material_switch(
+          input_id = "trend_line",
+          label = "Trend Line",
+          off_label = "",
+          on_label = ""
+        ),
+        material_radio_button(
+          input_id = "plot_theme",
+          label = "Theme",
+          choices = 
+            c("Light" = "light",
+              "Dark" = "dark")
+        )
+      )
+    ),
+    material_column(
+      width = 9,
+      material_card(
+        title = "Power vs Efficiency",
+        depth = 4,
+        plotOutput("mtcars_plot")
+      )
+    )
+  )
+)
+```
+
+Stuff
+==========================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Chart A
+
+```{r}
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Chart B
+
+```{r}
+
+```
+
+### Chart C
+
+```{r}
+
+```
+
